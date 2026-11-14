@@ -1,3 +1,5 @@
+// secret-scan: test fixtures only
+// (the credential-looking strings below are fake and exist to prove redaction)
 import assert from "node:assert/strict";
 import test from "node:test";
 import { sanitize, sanitizeForTerminal, toSafeSlug, wrapUntrusted } from "../src/security/sanitize.js";
