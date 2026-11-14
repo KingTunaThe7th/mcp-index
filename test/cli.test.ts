@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { parseGatewayConfig } from "../src/gateway/config.js";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const cli = join(projectRoot, "dist", "cli.js");
@@ -30,6 +31,28 @@ test("a missing index is reported as a usage problem", () => {
     assert.match(result.stderr, /no index at .*run `mcp-index sync` first/);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("init writes a config that is internally consistent", () => {
+  const dir = mkdtempSync(join(tmpdir(), "mcp-index-init-"));
+  try {
+    const result = spawnSync(process.execPath, [cli, "init"], { cwd: dir, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+
+    const config = parseGatewayConfig(JSON.parse(readFileSync(join(dir, "mcp-index.json"), "utf8")));
+    const files = config.servers.files;
+    assert.ok(files);
+
+    // The launch args must use the sandbox path, not the host path: a host path
+    // does not exist inside the sandbox and the server would fail to start.
+    assert.ok(files.args?.includes("/work"), "args should reference the mount target");
+    assert.equal(files.mounts?.[0]?.target, "/work");
+
+    // npx cannot download inside a network-isolated sandbox.
+    assert.equal(files.network, "egress");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

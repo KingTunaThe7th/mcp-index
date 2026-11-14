@@ -317,15 +317,22 @@ export function buildProgram(): Command {
         servers: {
           files: {
             command: "npx",
-            args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/project"],
-            mounts: [{ source: "/path/to/project", target: "/work", mode: "ro" }],
-            network: "none",
-            destructiveTools: ["write_file", "edit_file", "move_file"],
+            // Arguments are sandbox paths: /work is where the mount lands.
+            args: ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
+            mounts: [{ source: "/path/to/your/project", target: "/work", mode: "ro" }],
+            // npx must download the package on first run, which needs egress.
+            // For a strict sandbox install it on the host and set "none".
+            network: "egress",
+            persistentHome: true,
+            destructiveTools: ["write_file", "edit_file", "move_file", "create_directory"],
           },
         },
       };
       writeFileSync(path, `${JSON.stringify(template, null, 2)}\n`, { mode: 0o600 });
       log.info(`wrote ${path} (edit the paths, then run \`mcp-index gateway\`)`);
+      log.info(
+        'note: npx needs network egress on first run; for a fully offline sandbox, install the package on the host, point args at its dist/index.js, and set network to "none"',
+      );
     });
 
   const pin = program.command("pin").description("manage trust-on-first-use tool pins");

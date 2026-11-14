@@ -7,19 +7,20 @@
   },
   "servers": {
     "files": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
-      "cwd": "/path/to/your/project",
-      "mounts": [{ "source": "/path/to/your/project", "target": "/work", "mode": "ro" }],
+      "command": "node",
+      "args": ["/servers/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "/work"],
+      "mounts": [
+        { "source": "~/.local/share/mcp-index/servers", "target": "/servers", "mode": "ro" },
+        { "source": "/path/to/your/project", "target": "/work", "mode": "ro" }
+      ],
       "network": "none",
-      "persistentHome": false,
-      "destructiveTools": ["write_file", "edit_file", "move_file"],
+      "destructiveTools": ["write_file", "edit_file", "move_file", "create_directory"],
       "limits": { "memoryMb": 1024, "cpuSeconds": 300, "openFiles": 2048 }
     },
     "memory": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],
-      "network": "none",
+      "network": "egress",
       "persistentHome": true
     },
     "remote-example": {
