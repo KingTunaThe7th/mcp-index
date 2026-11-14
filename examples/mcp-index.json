@@ -1,0 +1,31 @@
+{
+  "gateway": {
+    "driver": "auto",
+    "allowUnsandboxed": false,
+    "host": "127.0.0.1",
+    "port": 7777
+  },
+  "servers": {
+    "files": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"],
+      "cwd": "/path/to/your/project",
+      "mounts": [{ "source": "/path/to/your/project", "target": "/work", "mode": "ro" }],
+      "network": "none",
+      "persistentHome": false,
+      "destructiveTools": ["write_file", "edit_file", "move_file"],
+      "limits": { "memoryMb": 1024, "cpuSeconds": 300, "openFiles": 2048 }
+    },
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "network": "none",
+      "persistentHome": true
+    },
+    "remote-example": {
+      "url": "https://example.com/mcp",
+      "headers": { "Authorization": "Bearer replace-me" },
+      "enabled": false
+    }
+  }
+}
