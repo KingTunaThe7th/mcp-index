@@ -18,11 +18,26 @@ if grep -rn "innerHTML" src/ >/dev/null 2>&1; then
 fi
 
 # 2. Shallow secret scan over staged files.
+#
+# Files that intentionally contain fake credentials (test fixtures) opt out
+# with a marker comment, so the exclusion is visible in review rather than
+# hidden in a glob.
 pattern='(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
-if printf '%s\n' "$staged" | xargs -r grep -nEI "$pattern" 2>/dev/null; then
+scan_list=$(mktemp)
+printf '%s\n' "$staged" | while IFS= read -r file; do
+  [ -f "$file" ] || continue
+  if grep -q 'secret-scan: test fixtures only' "$file" 2>/dev/null; then
+    continue
+  fi
+  printf '%s\n' "$file" >> "$scan_list"
+done
+
+if [ -s "$scan_list" ] && xargs -r grep -nEI "$pattern" < "$scan_list" 2>/dev/null; then
+  rm -f "$scan_list"
   printf 'pre-commit: possible secret in staged files, refusing to commit\n' >&2
   exit 1
 fi
+rm -f "$scan_list"
 
 # 3. Typecheck when dependencies are installed.
 if [ -f tsconfig.json ] && [ -d node_modules/typescript ]; then
