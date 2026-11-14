@@ -58,6 +58,11 @@ export interface RawServer {
   packages?: PackageRef[];
   remotes?: RemoteRef[];
   updatedAt?: string | null;
+  /** Local client configs only: the launch command. */
+  command?: string | null;
+  args?: string[];
+  /** Local client configs only: env *names*, never values. */
+  envNames?: string[];
   raw?: unknown;
 }
 
