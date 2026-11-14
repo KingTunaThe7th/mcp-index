@@ -19,6 +19,7 @@ const ORDER: Record<LogLevel, number> = {
 
 let level: LogLevel = "info";
 let jsonMode = false;
+let stdioSafe = false;
 
 export function setLogLevel(next: LogLevel): void {
   level = next;
@@ -28,13 +29,24 @@ export function setJsonMode(enabled: boolean): void {
   jsonMode = enabled;
 }
 
+/**
+ * In stdio-gateway mode stdout *is* the MCP transport. A single log line there
+ * corrupts the protocol stream, so everything is rerouted to stderr.
+ */
+export function setStdioSafe(enabled: boolean): void {
+  stdioSafe = enabled;
+}
+
 function enabled(candidate: LogLevel): boolean {
   return ORDER[candidate] <= ORDER[level];
 }
 
 function write(stream: "stdout" | "stderr", prefix: string, message: string): void {
-  const line = `${prefix}${sanitizeForTerminal(message)}`;
-  if (stream === "stdout") process.stdout.write(`${line}\n`);
+  const target = stdioSafe ? "stderr" : stream;
+  // Multi-line output (tables, records) must keep its newlines, but escape
+  // sequences are always stripped.
+  const line = `${prefix}${sanitizeForTerminal(message, { multiline: true, maxLength: 0 })}`;
+  if (target === "stdout") process.stdout.write(`${line}\n`);
   else process.stderr.write(`${line}\n`);
 }
 

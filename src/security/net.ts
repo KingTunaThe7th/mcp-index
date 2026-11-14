@@ -207,3 +207,29 @@ export async function assertSafeUrl(raw: string, options: UrlGuardOptions = {}):
 
   return url;
 }
+
+/**
+ * `fetch` that re-validates every request.
+ *
+ * `assertSafeUrl` at connect time is not enough for a long-lived transport: the
+ * server re-resolves and re-requests on its own, and DNS can change between
+ * calls (rebinding). Wrapping `fetch` closes most of that window; the residual
+ * TOCTOU gap would require pinning the resolved IP in the socket layer.
+ */
+export type FetchInput = string | URL | Request;
+
+export function createGuardedFetch(
+  allowPrivate = false,
+  baseFetch: typeof fetch = fetch,
+): typeof fetch {
+  return (async (input: FetchInput, init?: RequestInit): Promise<Response> => {
+    const target =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    await assertSafeUrl(target, { allowPrivate });
+    return baseFetch(input, init);
+  }) as typeof fetch;
+}

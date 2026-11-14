@@ -6,6 +6,7 @@
  * environment that is already stripped down to the allowlist.
  */
 import { existsSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import { detectCapabilities, discoverRuntimePrefixes } from "./detect.js";
 import type { Capabilities, DriverName } from "./detect.js";
 import { buildBwrapCommand } from "./drivers/bwrap.js";
@@ -13,7 +14,7 @@ import type { BuildOptions, SandboxCommand } from "./drivers/bwrap.js";
 import { buildContainerCommand } from "./drivers/container.js";
 import { buildUnsandboxedCommand, unsandboxedEnvironment } from "./drivers/none.js";
 import { buildUnshareCommand } from "./drivers/unshare.js";
-import type { SandboxPolicy } from "./policy.js";
+import type { MountSpec, SandboxPolicy } from "./policy.js";
 import { SandboxRefusal, filterEnvironment, validatePolicy } from "./policy.js";
 import { prlimitAvailable, wrapWithPrlimit } from "./prlimit.js";
 
@@ -113,6 +114,38 @@ export function buildSandboxedCommand(
     containment: CONTAINMENT[effective.driver],
     limitsApplied,
   };
+}
+
+/**
+ * Translate a host path into its in-sandbox equivalent.
+ *
+ * `cwd` in a config is written as a host path (that is what a user reads off
+ * their filesystem), but the child only ever sees mount targets. Without this
+ * translation bwrap fails with "Can't chdir to /home/you/project".
+ *
+ * Returns undefined when the path is not covered by any mount; callers decide
+ * whether that is a warning or an error.
+ */
+export function translateCwd(cwd: string | undefined, mounts: MountSpec[]): string | undefined {
+  if (!cwd) return undefined;
+
+  const resolved = resolve(cwd);
+  let match: { base: string; target: string } | null = null;
+
+  for (const mount of mounts) {
+    const base = resolve(mount.source);
+    if (resolved === base || resolved.startsWith(`${base}${sep}`)) {
+      if (!match || base.length > match.base.length) {
+        match = { base, target: mount.target };
+      }
+    }
+  }
+
+  if (!match) return undefined;
+
+  const rest = resolved.slice(match.base.length).replace(/^\/+/, "");
+  const target = match.target.replace(/\/+$/, "");
+  return rest.length > 0 ? `${target}/${rest}` : target;
 }
 
 export interface DoctorReport {
