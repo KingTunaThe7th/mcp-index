@@ -469,10 +469,27 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   return 0;
 }
 
+/**
+ * `mcp-index search ... | head` closes the pipe while we are still writing.
+ * Without this handler the process dies with an unhandled EPIPE and a stack
+ * trace instead of exiting quietly the way every other CLI does.
+ */
+function exitQuietlyOnBrokenPipe(): void {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "EPIPE") {
+        process.exit(0);
+      }
+      throw error;
+    });
+  }
+}
+
 const invokedDirectly =
   typeof process.argv[1] === "string" && /cli\.(?:ts|js)$/.test(process.argv[1]);
 
 if (invokedDirectly) {
+  exitQuietlyOnBrokenPipe();
   main()
     // Do not call process.exit(0) on success: `gateway` and `serve` are
     // long-running and rely on the event loop staying alive. Short commands
