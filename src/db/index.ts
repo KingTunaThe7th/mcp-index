@@ -234,16 +234,63 @@ export function findServersByRepo(db: DatabaseSync, repoUrl: string): ServerReco
  * expanded as a prefix query. That keeps `MATCH` from throwing or from
  * targeting hidden columns.
  */
-export function buildFtsQuery(input: string | undefined, matchAll = false): string | null {
-  if (!input) return null;
-  const terms = (input.match(/[\p{L}\p{N}][\p{L}\p{N}_.@/+-]*/gu) ?? [])
+export function extractTerms(input: string | undefined): string[] {
+  if (!input) return [];
+  return (input.match(/[\p{L}\p{N}][\p{L}\p{N}_.@/+-]*/gu) ?? [])
     .map((term) => term.replace(/["^*(){}:,]/g, "").trim())
     .filter((term) => term.length > 0)
     .slice(0, 12);
+}
 
+export function buildFtsQuery(input: string | undefined, matchAll = false): string | null {
+  const terms = extractTerms(input);
   if (terms.length === 0) return null;
   const joiner = matchAll ? " OR " : " AND ";
   return terms.map((term) => `"${term}"*`).join(joiner);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Highlight query terms in JavaScript.
+ *
+ * FTS5's own `snippet()`/`highlight()` are unusable here: node:sqlite returns
+ * their result as an opaque pointer and raises "SQL logic error". Doing it in
+ * JS is portable, works for the LIKE fallback too, and keeps the output
+ * sanitized by the caller.
+ */
+export function highlightText(
+  text: string | null,
+  terms: string[],
+  maxLength = 220,
+): string | null {
+  if (!text) return null;
+  if (terms.length === 0 || text.length <= maxLength) {
+    return terms.length === 0 ? text : markTerms(text, terms);
+  }
+
+  const lower = text.toLowerCase();
+  let firstMatch = -1;
+  for (const term of terms) {
+    const index = lower.indexOf(term.toLowerCase());
+    if (index !== -1 && (firstMatch === -1 || index < firstMatch)) firstMatch = index;
+  }
+
+  const start = firstMatch === -1 ? 0 : Math.max(0, firstMatch - 40);
+  const slice = text.slice(start, start + maxLength);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = start + maxLength < text.length ? "..." : "";
+  return `${prefix}${markTerms(slice, terms)}${suffix}`;
+}
+
+function markTerms(text: string, terms: string[]): string {
+  let output = text;
+  for (const term of terms) {
+    output = output.replace(new RegExp(`(${escapeRegExp(term)})`, "gi"), "[$1]");
+  }
+  return output;
 }
 
 export function searchServers(db: DatabaseSync, options: SearchOptions = {}): SearchHit[] {
@@ -272,6 +319,16 @@ export function searchServers(db: DatabaseSync, options: SearchOptions = {}): Se
 
   const filters = where.length > 0 ? where.join(" AND ") : "1 = 1";
   const bindings = params as never[];
+  const terms = extractTerms(options.query);
+
+  const toHit = (row: Record<string, unknown>, score: number): SearchHit => {
+    const record = rowToRecord(row);
+    return {
+      ...record,
+      score,
+      highlight: highlightText(record.description ?? record.title, terms),
+    };
+  };
 
   if (match) {
     try {
@@ -279,26 +336,22 @@ export function searchServers(db: DatabaseSync, options: SearchOptions = {}): Se
         .prepare(
           `SELECT ${SELECT_COLUMNS},
              bm25(servers_fts, 12.0, 8.0, 1.0, 5.0) AS rank,
-             snippet(servers_fts, 2, '[', ']', '...', 12) AS highlight
+             (CASE WHEN s.install = '[]' THEN 1 ELSE 0 END) AS missing_launch
            FROM servers_fts
            JOIN servers s ON s.rid = servers_fts.rowid
            WHERE servers_fts MATCH ? AND ${filters}
-           ORDER BY rank ASC, s.is_official DESC, s.name ASC
+           ORDER BY rank ASC, missing_launch ASC, s.is_official DESC, s.name ASC
            LIMIT ? OFFSET ?`,
         )
         .all(match, ...bindings, limit, offset)
-        .map((row) => ({
-          ...rowToRecord(row),
-          score: -Number(row.rank ?? 0),
-          highlight: asString(row.highlight),
-        }));
+        .map((row) => toHit(row, -Number(row.rank ?? 0)));
     } catch {
       // Fall back to a LIKE scan if FTS5 rejects the expression for any
       // reason. Correctness beats ranking.
       const like = `%${(options.query ?? "").replace(/[%_\\]/g, "\\$&")}%`;
       return db
         .prepare(
-          `SELECT ${SELECT_COLUMNS}, 0 AS rank, NULL AS highlight
+          `SELECT ${SELECT_COLUMNS}, 0 AS rank
            FROM servers s
            WHERE (s.name LIKE ? ESCAPE '\\' OR s.description LIKE ? ESCAPE '\\' OR s.title LIKE ? ESCAPE '\\')
              AND ${filters}
@@ -306,20 +359,20 @@ export function searchServers(db: DatabaseSync, options: SearchOptions = {}): Se
            LIMIT ? OFFSET ?`,
         )
         .all(like, like, like, ...bindings, limit, offset)
-        .map((row) => ({ ...rowToRecord(row), score: 0, highlight: null }));
+        .map((row) => toHit(row, 0));
     }
   }
 
   return db
     .prepare(
-      `SELECT ${SELECT_COLUMNS}, 0 AS rank, NULL AS highlight
+      `SELECT ${SELECT_COLUMNS}, 0 AS rank
        FROM servers s
        WHERE ${filters}
        ORDER BY s.is_official DESC, s.name ASC
        LIMIT ? OFFSET ?`,
     )
     .all(...bindings, limit, offset)
-    .map((row) => ({ ...rowToRecord(row), score: 0, highlight: null }));
+    .map((row) => toHit(row, 0));
 }
 
 
