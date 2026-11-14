@@ -38,11 +38,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Test
-        run: npm test
-
+      # The gateway and CLI tests exercise the built artifact, so build first.
       - name: Build
         run: npm run build
+
+      - name: Test
+        run: npm test
 
       - name: Audit runtime dependencies
         run: npm audit --omit=dev || true
