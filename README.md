@@ -54,10 +54,20 @@ Three separate problems, one tool:
 Requires Node **22.5+** (for `node:sqlite`) and, for the gateway, Linux with
 unprivileged user namespaces.
 
+> **This package is not published to npm.** The name `mcp-index` on npm belongs
+> to an unrelated project, so `npm install -g mcp-index` or `npx mcp-index`
+> would run *their* code, not this. Install from the repository.
+
 ```console
-$ npm install -g mcp-index     # or: npm install && npm run build
-$ mcp-index doctor             # check what isolation this host can provide
+$ git clone https://github.com/KingTunaThe7th/mcp-index.git
+$ cd mcp-index
+$ npm ci --ignore-scripts
+$ npm run build
+$ node dist/cli.js doctor      # what isolation can this host provide?
 ```
+
+`npm link` additionally installs a `mcp-index` shim into your node prefix's
+`bin` (no registry involved); undo it with `npm unlink -g mcp-index`.
 
 There are **no native build steps**: the index uses Node's built-in SQLite,
 including FTS5.
@@ -65,39 +75,118 @@ including FTS5.
 ## Quick start
 
 ```console
-# 1. build the catalog (registry + awesome list + your existing client configs)
-$ mcp-index sync
+# 1. pre-install the servers you intend to mount
+$ mkdir -p ~/.local/share/mcp-index/servers
+$ npm install --prefix ~/.local/share/mcp-index/servers \
+    @modelcontextprotocol/server-filesystem
 
-# 2. find something
-$ mcp-index search "sqlite" --official
-$ mcp-index show io.github.someone/sqlite-mcp
-$ mcp-index snippet io.github.someone/sqlite-mcp --client cursor
-
-# 3. mount servers behind one endpoint
-$ mcp-index init                       # writes mcp-index.json
+# 2. write a config, edit the paths, mount everything behind one endpoint
+$ node dist/cli.js init
 $ $EDITOR mcp-index.json
-$ mcp-index gateway                    # stdio, for a client config
+$ node dist/cli.js gateway        # stdio endpoint for any MCP client
+
+# 3. the catalog is separate, and only needed by search/show/snippet/serve
+$ node dist/cli.js sync
+$ node dist/cli.js search postgres --limit 5
 ```
 
-Point your MCP client at the gateway:
-
-```json
-{
-  "mcpServers": {
-    "index": { "command": "mcp-index", "args": ["gateway"] }
-  }
-}
-```
+The gateway never opens the catalog database: `sync` is only required by
+`search`, `show`, `snippet` and the `serve` dashboard.
 
 Or run it over HTTP with a dashboard:
 
 ```console
-$ mcp-index serve --port 7777
+$ node dist/cli.js serve --port 7777
 dashboard:  http://127.0.0.1:7777
 mcp:        http://127.0.0.1:7777/mcp
 token file: ~/.local/share/mcp-index/token
 ```
 
+
+## Client setup: Cline
+
+Cline spawns unmodified stdio commands, so it needs **absolute paths** — its
+schema is `command` / `args` / `env` / `disabled` / `autoApprove`, and has no
+`cwd`.
+
+**1. Pre-install the server** (`npx` cannot download inside a `network: "none"`
+sandbox):
+
+```console
+$ mkdir -p ~/.local/share/mcp-index/servers
+$ npm install --prefix ~/.local/share/mcp-index/servers \
+    @modelcontextprotocol/server-filesystem
+```
+
+**2. Write `~/.local/share/mcp-index/mcp-index.json`** — mount the package
+read-only at `/servers` and your project at `/work`:
+
+```json
+{
+  "servers": {
+    "files": {
+      "command": "node",
+      "args": ["/servers/node_modules/@modelcontextprotocol/server-filesystem/dist/index.js", "/work"],
+      "mounts": [
+        { "source": "~/.local/share/mcp-index/servers", "target": "/servers", "mode": "ro" },
+        { "source": "/path/to/your/project", "target": "/work", "mode": "ro" }
+      ],
+      "network": "none",
+      "destructiveTools": ["write_file", "edit_file", "move_file", "create_directory"]
+    }
+  }
+}
+```
+
+**3. Add the entry.** In Cline: **MCP Servers → Configure → Configure MCP
+Servers** (the extension's `cline_mcp_settings.json`; the CLI reads
+`~/.cline/data/settings/cline_mcp_settings.json`, overridable with
+`CLINE_MCP_SETTINGS_PATH`):
+
+```json
+{
+  "mcpServers": {
+    "index": {
+      "command": "/absolute/path/to/node",
+      "args": [
+        "/absolute/path/to/mcp-index/dist/cli.js",
+        "gateway",
+        "--config",
+        "/home/you/.local/share/mcp-index/mcp-index.json"
+      ],
+      "env": { "MCP_INDEX_HOME": "/home/you/.local/share/mcp-index" },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+With the Cline CLI, the same thing:
+
+```console
+$ cline mcp add mcp-index --yes -- /absolute/path/to/node \
+    /absolute/path/to/mcp-index/dist/cli.js gateway \
+    --config /home/you/.local/share/mcp-index/mcp-index.json
+```
+
+The panel then lists namespaced tools — `files__read_file`,
+`files__list_directory`, `files__search_files`, … — and `autoApprove: []` means
+Cline asks before each call. Adding namespaced names there skips the prompt.
+
+Verified behaviour, and what to do about it:
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `Refused: "files__write_file" is marked destructive and was not approved` | The tool is in `destructiveTools` and needs MCP elicitation. If your client cannot elicit, remove it from the list to allow writes outright. |
+| `ENOTFOUND registry.npmjs.org` | The sandbox has no network. Pre-install the package, or set `"network": "egress"`. |
+| Tool missing from the list | The mount is `blocked` by schema drift, or the process died. Check the gateway's stderr in Cline's MCP output pane, then `node dist/cli.js pin list`. |
+| Empty or missing directory listing | `args` and `target` are **sandbox** paths (`/work`); only `mounts.source` is a host path. |
+| Everything vanished after a package upgrade | The TOFU pin caught a changed toolset. Review, then `node dist/cli.js pin approve files`. |
+
+For HTTP instead of stdio, run `node dist/cli.js serve` and add a remote entry:
+`{ "type": "streamableHttp", "url": "http://127.0.0.1:7777/mcp",
+"headers": { "Authorization": "Bearer <token from --print-token>" } }`.
 
 ## Commands
 
@@ -168,7 +257,7 @@ Per-server keys:
 | `url`, `headers`, `transport` | — | remote launch (`http` / `sse`). |
 | `cwd` | sandbox home | Host path; translated into the sandbox through `mounts`. |
 | `mounts` | `[]` | `{source, target, mode: "ro"\|"rw"}`. Anything not mounted does not exist. |
-| `network` | `"none"` | `"none"` or `"egress"`. |
+| `network` | `"none"` | `"none"` or `"egress"`. `npx`/`uvx` need `egress` on the first run. |
 | `env` | `{}` | Extra non-secret variables for the child. |
 | `persistentHome` | `false` | Keep `$HOME` across runs (state lives in `homes/<alias>`). |
 | `image` | — | Required by the `docker`/`podman` drivers. |
