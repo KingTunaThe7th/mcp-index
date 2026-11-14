@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
     "test": "node --import tsx --test test/*.test.ts",
     "dev": "tsx src/cli.ts",
     "prepublishOnly": "npm run build"
