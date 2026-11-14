@@ -239,6 +239,57 @@ Two behaviours were verified on the reference host rather than assumed:
 - In `unshare` and `none` mode, filesystem isolation is absent by definition.
 
 
+## Data sources, licenses and terms
+
+`sync` makes exactly two kinds of outbound request:
+
+| Source | Request | Frequency |
+| --- | --- | --- |
+| MCP Registry | `GET /v0/servers?limit=100&version=latest`, cursor-paginated | one pass per `sync` |
+| awesome-mcp-servers | one markdown file from `raw.githubusercontent.com` | **one** request per `sync` |
+
+Both send a single identifying `User-Agent` (`mcp-index/<version> (+repo URL)`),
+cap retries at three, and honour `Retry-After` on 429/5xx. There is no crawler,
+no GitHub API call and no token: the project never touches `api.github.com`, so
+API rate limits, token-sharing rules and the `api.github.com` abuse clauses do
+not apply to it.
+
+The awesome list is MIT licensed (© 2024 Frank Fiegel). Its notice — and the
+notice for every runtime dependency — is in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). If you redistribute an index
+you generated, carry that notice with it: the database is a derivative of that
+content. The repository itself ships no data, and `*.db` is gitignored so a
+clone never contains a snapshot of third-party metadata.
+
+On GitHub's side the relevant clauses are:
+
+- **Acceptable Use Policies §6 (Services Usage Limits)** — "You will not
+  reproduce, duplicate, copy, sell, resell or exploit any portion of the
+  Service…". The single file fetched is repository content owned by its author
+  and published under MIT; it is read once per sync into a local index, and is
+  never resold or republished by this project.
+- **Acceptable Use Policies §7 (Information Usage Restrictions)** — restricts
+  scraping for spam and for selling personal information. This project does
+  neither: it reads public repository metadata, collects no personal data, and
+  sends nothing to third parties.
+- **Acceptable Use Policies §4 (Spam and Inauthentic Activity)** and **§9
+  (Excessive Bandwidth Use)** — one small file per sync is not bulk activity,
+  and nothing here is used to place load on GitHub's servers.
+- **Terms of Service §H (API Terms)** — not applicable; no GitHub API is used.
+
+To avoid contacting GitHub entirely, point the importer at a local copy:
+
+```console
+$ mcp-index sync --awesome-url "file://$PWD/README.md"   # file:// is read directly
+```
+
+Use `--registry-url` similarly for the registry half, so a sync can run fully
+offline against a mirror.
+
+**Privacy:** there is no telemetry, no analytics and no phone-home. The only
+data that leaves your machine are those two upstream requests. Local client
+configs are read only on your machine, and only env var *names* are kept.
+
 ## Architecture
 
 ```
@@ -298,5 +349,7 @@ cannot elicit approval. It skips itself where bubblewrap is unavailable.
 
 ## License
 
-MIT. See [LICENSE](LICENSE). Security policy in [SECURITY.md](SECURITY.md).
+MIT. See [LICENSE](LICENSE). Security policy in [SECURITY.md](SECURITY.md),
+third-party licenses and upstream terms in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
