@@ -1,10 +1,16 @@
 /**
  * HTTP helpers with bounded retries.
  *
- * Only used for read-only fetches against the MCP registry and a small number
- * of hard-coded hosts. Callers pass an explicit timeout so a hung upstream can
- * never wedge a sync.
+ * Only used for read-only fetches against the MCP registry and one
+ * GitHub-hosted markdown file. Every request identifies itself with a single
+ * `USER_AGENT` string, retries are capped, and `Retry-After` is honoured, so a
+ * sync cannot turn into bulk traffic against an upstream.
+ *
+ * `file://` URLs are supported so a sync can run with no network access at all
+ * (point `--awesome-url` at a local copy of the list).
  */
+import { readFile } from "node:fs/promises";
+import { USER_AGENT } from "../config.js";
 
 export interface FetchOptions {
   timeoutMs?: number;
@@ -59,7 +65,7 @@ async function request(url: string, options: FetchOptions): Promise<Response> {
         redirect: "follow",
         headers: {
           accept: "application/json",
-          "user-agent": "mcp-index (+https://github.com/KingTunaThe7th/mcp-index)",
+          "user-agent": USER_AGENT,
           ...options.headers,
         },
       });
@@ -89,6 +95,10 @@ async function request(url: string, options: FetchOptions): Promise<Response> {
 }
 
 export async function fetchJson<T>(url: string, options: FetchOptions = {}): Promise<T> {
+  if (url.startsWith("file:")) {
+    return JSON.parse(await readFile(new URL(url), "utf8")) as T;
+  }
+
   const response = await request(url, {
     ...options,
     headers: { accept: "application/json", ...options.headers },
@@ -97,6 +107,10 @@ export async function fetchJson<T>(url: string, options: FetchOptions = {}): Pro
 }
 
 export async function fetchText(url: string, options: FetchOptions = {}): Promise<string> {
+  if (url.startsWith("file:")) {
+    return await readFile(new URL(url), "utf8");
+  }
+
   const response = await request(url, {
     ...options,
     headers: { accept: "text/plain,*/*", ...options.headers },
