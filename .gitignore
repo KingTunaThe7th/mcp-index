@@ -1,0 +1,31 @@
+# build output
+dist/
+*.tsbuildinfo
+
+# dependencies
+node_modules/
+
+# test / coverage
+coverage/
+.nyc_output/
+
+# derived index (regenerate with `mcp-index sync`)
+*.db
+*.db-wal
+*.db-shm
+index.sqlite
+
+# local runtime state: capability cache, bearer token, TOFU pins, sandbox homes
+.mcp-index/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# editors / os
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/

@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+# Local pre-commit gate. Enable with:
+#   git config --local core.hooksPath .githooks
+#
+# This project hands third-party binaries to a sandbox and renders untrusted
+# registry text, so the cheap invariant checks run before every commit.
+set -eu
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+# 1. No innerHTML anywhere in src/ -- registry descriptions are attacker
+#    controlled, so any innerHTML is a stored-XSS vector.
+if grep -rn "innerHTML" src/ >/dev/null 2>&1; then
+  printf 'pre-commit: innerHTML found in src/ (XSS risk, use textContent):\n' >&2
+  grep -rn "innerHTML" src/ >&2 || true
+  exit 1
+fi
+
+# 2. Shallow secret scan over staged files.
+pattern='(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
+if printf '%s\n' "$staged" | xargs -r grep -nEI "$pattern" 2>/dev/null; then
+  printf 'pre-commit: possible secret in staged files, refusing to commit\n' >&2
+  exit 1
+fi
+
+# 3. Typecheck when dependencies are installed.
+if [ -f tsconfig.json ] && [ -d node_modules/typescript ]; then
+  npm run --silent typecheck
+fi
